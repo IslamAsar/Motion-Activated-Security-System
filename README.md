@@ -149,8 +149,6 @@ The finished system was housed in a painted enclosure with the PIR sensor, deadb
 ├── Motion_Security/            # Arduino firmware source folder
 │   └── Motion_Security.ino     # Main Arduino sketch
 ├── Images/                     # Wiring diagram, prototype, and enclosure photos
-├── Report/                     # Project report and documentation
-├── Videos/                     # Demo and validation footage
 ├── Schematic.fzz               # Fritzing wiring/breadboard project
 ├── Simulation.pdsprj           # Proteus 8 simulation project
 ├── README.md                   # Project documentation
