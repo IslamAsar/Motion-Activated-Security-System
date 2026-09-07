@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔐 Motion-Activated Smart Security System
+# 🔐 Motion-Activated Security System
 
 ### Arduino-based intrusion detection with live OLED telemetry
 
