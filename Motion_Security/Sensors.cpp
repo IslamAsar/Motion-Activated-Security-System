@@ -16,12 +16,18 @@ bool MotionSensor::isMotionDetected() {
 }
 
 // ---------------- ButtonSensor ----------------
+ButtonSensor* ButtonSensor::_instance = nullptr;
+
 ButtonSensor::ButtonSensor(uint8_t buttonPin)
-  : _pin(buttonPin), _previousState(HIGH), _lastChangeAt(0) {}
+  : _pin(buttonPin), _pressed(false), _lastInterruptAt(0) {
+  _instance = this;
+}
 
 void ButtonSensor::begin() {
   pinMode(_pin, INPUT_PULLUP);
-  _previousState = digitalRead(_pin);
+  _pressed = false;
+  _lastInterruptAt = millis();
+  attachInterrupt(digitalPinToInterrupt(_pin), ButtonSensor::handleInterrupt, FALLING);
 }
 
 int ButtonSensor::readValue() {
@@ -29,16 +35,23 @@ int ButtonSensor::readValue() {
 }
 
 bool ButtonSensor::wasPressed() {
-  bool currentState = readValue();
-  unsigned long now = millis();
-  // Accept only a HIGH-to-LOW transition after the 50 ms debounce interval.
-  bool pressed = _previousState == HIGH && currentState == LOW &&
-                 now - _lastChangeAt >= 50UL;
-  if (currentState != _previousState) {
-    _lastChangeAt = now;
-    _previousState = currentState;
-  }
+  noInterrupts();
+  bool pressed = _pressed;
+  _pressed = false;
+  interrupts();
   return pressed;
+}
+
+void ButtonSensor::handleInterrupt() {
+  if (_instance == nullptr) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (now - _instance->_lastInterruptAt >= 50UL) {
+    _instance->_pressed = true;
+    _instance->_lastInterruptAt = now;
+  }
 }
 
 // ---------------- LightSensor ----------------

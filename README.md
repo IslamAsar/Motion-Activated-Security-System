@@ -42,7 +42,7 @@ Mode switching is handled by the debounced `ButtonSensor` class, and every physi
 - 💡 **Adaptive day/night light logic** — LDR reading mapped to a 0–100% illumination scale, with a Night Mode threshold below 20%
 - 🚨 **Multi-modal intrusion alarm** — simultaneous red LED, servo deadbolt lock, 1 kHz siren, and OLED warning splash
 - 📟 **Live OLED telemetry** — current state, motion count, light %, and night-mode status
-- 🛡️ **Software-debounced input** — 50 ms `millis()`-based lockout eliminates button contact chatter
+- 🛡️ **Interrupt-driven input** — D3 falling-edge interrupt with a 50 ms `millis()`-based debounce lockout
 - 🧹 **State-resetting event log** — motion counter resets automatically each time the system is armed
 
 ## 🔧 Hardware / Bill of Materials
@@ -117,8 +117,10 @@ classDiagram
 	}
 	class ButtonSensor {
 		-_pin uint8_t
-		-_previousState bool
-		-_lastChangeAt unsigned long
+		-_pressed volatile bool
+		-_lastInterruptAt volatile unsigned long
+		-_instance ButtonSensor*
+		-handleInterrupt() void
 		+ButtonSensor(buttonPin)
 		+begin() void
 		+readValue() int

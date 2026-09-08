@@ -18,8 +18,10 @@ public:
 class ButtonSensor : public Sensor {
 private:
   uint8_t _pin;
-  bool _previousState;
-  unsigned long _lastChangeAt;
+  volatile bool _pressed;
+  volatile unsigned long _lastInterruptAt;
+  static ButtonSensor* _instance;
+  static void handleInterrupt();
 
 public:
   explicit ButtonSensor(uint8_t buttonPin);
