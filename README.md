@@ -96,6 +96,7 @@ The firmware is a deterministic finite-state machine with two states, `DISARMED`
 classDiagram
 	class HardwareComponent {
 		<<abstract>>
+		+~HardwareComponent()
 		+begin() void
 	}
 	class Sensor {
@@ -108,37 +109,67 @@ classDiagram
 		+deactivate() void
 	}
 	class MotionSensor {
-		-pin uint8_t
+		-_pin uint8_t
+		+MotionSensor(sensorPin)
+		+begin() void
+		+readValue() int
 		+isMotionDetected() bool
 	}
 	class ButtonSensor {
-		-pin uint8_t
-		-previousState bool
+		-_pin uint8_t
+		-_previousState bool
+		-_lastChangeAt unsigned long
+		+ButtonSensor(buttonPin)
+		+begin() void
+		+readValue() int
 		+wasPressed() bool
 	}
 	class LightSensor {
-		-pin uint8_t
+		-_pin uint8_t
+		+LightSensor(sensorPin)
+		+begin() void
+		+readValue() int
 		+readPercent() int
 	}
 	class LedActuator {
-		-pin uint8_t
+		-_pin uint8_t
+		+LedActuator(ledPin)
+		+begin() void
+		+activate() void
+		+deactivate() void
 	}
 	class Buzzer {
-		-pin uint8_t
-		-courtesyStep uint8_t
+		-_pin uint8_t
+		-_courtesyStep uint8_t
+		-_courtesyStartedAt unsigned long
+		+Buzzer(buzzerPin)
+		+begin() void
+		+activate() void
+		+deactivate() void
 		+courtesyBeep(now) void
 		+update(now) void
 	}
 	class ServoLock {
-		-pin uint8_t
-		-servo Servo
+		-_pin uint8_t
+		-_servo Servo
+		+ServoLock(servoPin)
+		+begin() void
+		+activate() void
+		+deactivate() void
 	}
 	class OledDisplay {
-		-display Adafruit_SSD1306
+		-_display Adafruit_SSD1306
+		+OledDisplay()
+		+begin() void
 		+updateStatus(...) void
 		+showAlert() void
 	}
-	class MotionSecurityFirmware
+	class Servo {
+		<<external library>>
+	}
+	class Adafruit_SSD1306 {
+		<<external library>>
+	}
 
 	HardwareComponent <|-- Sensor
 	HardwareComponent <|-- Actuator
@@ -150,9 +181,7 @@ classDiagram
 	Actuator <|-- ServoLock
 	HardwareComponent <|-- OledDisplay
 	ServoLock *-- Servo
-	MotionSecurityFirmware o-- Sensor
-	MotionSecurityFirmware o-- Actuator
-	MotionSecurityFirmware --> OledDisplay
+	OledDisplay *-- Adafruit_SSD1306
 ```
 
 ### 📚 Required Libraries

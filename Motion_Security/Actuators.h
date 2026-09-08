@@ -7,7 +7,7 @@
 // LED output used for the safe and intrusion status indicators.
 class LedActuator : public Actuator {
 private:
-  uint8_t pin;
+  uint8_t _pin;
 
 public:
   explicit LedActuator(uint8_t ledPin);
@@ -19,9 +19,9 @@ public:
 // Buzzer supports both the continuous alarm tone and a timed courtesy beep.
 class Buzzer : public Actuator {
 private:
-  uint8_t pin;
-  uint8_t courtesyStep;
-  unsigned long courtesyStartedAt;
+  uint8_t _pin;
+  uint8_t _courtesyStep;
+  unsigned long _courtesyStartedAt;
 
 public:
   explicit Buzzer(uint8_t buzzerPin);
@@ -35,8 +35,8 @@ public:
 // Servo output representing the unlocked (0 degrees) and locked (90 degrees) states.
 class ServoLock : public Actuator {
 private:
-  uint8_t pin;
-  Servo servo;
+  uint8_t _pin;
+  Servo _servo;
 
 public:
   explicit ServoLock(uint8_t servoPin);
@@ -48,7 +48,7 @@ public:
 // SSD1306 dashboard responsible for status and intrusion-alert rendering.
 class OledDisplay : public HardwareComponent {
 private:
-  Adafruit_SSD1306 display;
+  Adafruit_SSD1306 _display;
 
 public:
   OledDisplay();
