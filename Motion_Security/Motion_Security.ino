@@ -1,171 +1,105 @@
-#include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include <Servo.h>
+#include "Actuators.h"
+#include "Sensors.h"
 
-// ---------------- Pin assignments ----------------
-#define PIR_PIN 2
-#define BUTTON_PIN 3
-#define BUZZER_PIN 8
-#define SERVO_PIN 10
-#define GREEN_LED 11
-#define RED_LED 12
-#define LDR_PIN A0
-
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-
-// ---------------- System state and variables ----------------
+// The controller has two operating modes, selected with the push button.
 enum SystemState { DISARMED, ARMED };
-volatile SystemState currentState = DISARMED;
 
-volatile unsigned long lastButtonPress = 0;
-volatile bool stateChanged = false;
+// Hardware objects keep pin access and device-specific behavior encapsulated.
+MotionSensor motionSensor(2);
+ButtonSensor modeButton(3);
+LightSensor lightSensor(A0);
+Buzzer alarmBuzzer(8);
+ServoLock lockServo(10);
+LedActuator greenLed(11);
+LedActuator redLed(12);
+OledDisplay display;
 
-int motionCount = 0;
-Servo lockServo;
+Sensor* sensors[] = { &motionSensor, &modeButton, &lightSensor };
+Actuator* actuators[] = { &alarmBuzzer, &lockServo, &greenLed, &redLed };
 
-// Stores the previous PIR value so we can detect a rising edge (new motion event)
+// These values belong to the application state, not to individual devices.
+SystemState currentState = DISARMED;
 bool lastPirState = LOW;
+bool alarmActive = false;
+unsigned long alarmStartedAt = 0;
+int motionCount = 0;
 
-// ---------------- Button interrupt service routine ----------------
-void buttonISR() {
-  unsigned long currentMicros = micros();
-  if (currentMicros - lastButtonPress >= 50000) {
-    currentState = (currentState == DISARMED) ? ARMED : DISARMED;
-    stateChanged = true;
-    lastButtonPress = currentMicros;
-  }
+// Start all alarm outputs together and keep the start time for non-blocking timing.
+void startAlarm(unsigned long now, int lightPercent) {
+  alarmActive = true;
+  alarmStartedAt = now;
+  redLed.activate();
+  lockServo.activate();
+  alarmBuzzer.activate();
+  display.showAlert();
+  motionCount++;
+  Serial.print("[ALERT] Motion @");
+  Serial.print(now);
+  Serial.print("ms | Light:");
+  Serial.print(lightPercent);
+  Serial.println("%");
 }
 
-// ---------------- Display functions ----------------
-void updateDisplay(String status, int light, bool night) {
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-
-  display.setCursor(0, 0);
-  display.print("System: ");
-  display.println(status);
-
-  display.setCursor(0, 16);
-  display.print("Motions: ");
-  display.println(motionCount);
-
-  display.setCursor(0, 32);
-  display.print("Light: ");
-  display.print(light);
-  display.println("%");
-
-  display.setCursor(0, 48);
-  if (night) {
-    display.println("NIGHT MODE: ON");
-  } else {
-    display.println("NIGHT MODE: OFF");
-  }
-
-  display.display();
-}
-
-void displayIntruderAlert() {
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(10, 25);
-  display.println("INTRUDER!");
-  display.display();
+// Return every alarm output to its safe idle state.
+void stopAlarm() {
+  alarmActive = false;
+  redLed.deactivate();
+  lockServo.deactivate();
+  alarmBuzzer.deactivate();
 }
 
 void setup() {
   Serial.begin(9600);
 
-  pinMode(PIR_PIN, INPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(RED_LED, OUTPUT);
-  pinMode(GREEN_LED, OUTPUT);
-
-  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, FALLING);
-
-  lockServo.attach(SERVO_PIN);
-  lockServo.write(0);
-
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    for (;;);
+  // Use the common base-class API to initialize all sensors and actuators.
+  for (Sensor* sensor : sensors) {
+    sensor->begin();
   }
-  display.clearDisplay();
-  display.display();
+  for (Actuator* actuator : actuators) {
+    actuator->begin();
+  }
+  display.begin();
+  lockServo.deactivate();
+  alarmBuzzer.deactivate();
 }
 
 void loop() {
-  int ldrValue = analogRead(LDR_PIN);
-  int lightPercent = map(ldrValue, 0, 1023, 100, 0);
-  bool isNightMode = (lightPercent < 20);
+  unsigned long now = millis();
+  int lightPercent = lightSensor.readPercent();
+  bool isNightMode = lightPercent < 20;
+  bool currentPirState = motionSensor.isMotionDetected();
+  // A rising edge counts one motion event, even if the PIR stays HIGH.
+  bool pirTriggered = currentPirState && !lastPirState;
 
-  // Read the current PIR sensor state
-  bool currentPirState = digitalRead(PIR_PIN);
-
-  // Trigger only when motion is detected as a new rising edge: HIGH after LOW
-  bool pirTriggered = (currentPirState == HIGH && lastPirState == LOW);
-
-  if (stateChanged) {
-    if (currentState == ARMED) {
-      motionCount = 0;
-    }
-    stateChanged = false;
+  if (modeButton.wasPressed()) {
+    // Disarming also cancels an active alarm immediately.
+    currentState = (currentState == DISARMED) ? ARMED : DISARMED;
+    motionCount = (currentState == ARMED) ? 0 : motionCount;
+    stopAlarm();
   }
 
-  // ---------------- System behavior ----------------
   if (currentState == ARMED) {
-    digitalWrite(GREEN_LED, LOW);
-
-    if (pirTriggered) {
-      // --- Alarm state ---
-      digitalWrite(RED_LED, HIGH);
-      lockServo.write(90);
-      tone(BUZZER_PIN, 1000);
-
-      Serial.print("[ALERT] Motion @");
-      Serial.print(millis());
-      Serial.print("ms | Light:");
-      Serial.print(lightPercent);
-      Serial.println("%");
-
-      displayIntruderAlert();
-      motionCount++; // Count each detected motion event only once
-
-      delay(3000); // Show the alert and keep the alarm active for 3 seconds
-
-      // Stop the alarm
-      digitalWrite(RED_LED, LOW);
-      noTone(BUZZER_PIN);
-      lockServo.write(0);
+    greenLed.deactivate();
+    if (pirTriggered && !alarmActive) {
+      startAlarm(now, lightPercent);
     }
-
-    // Update the display with the armed status and motion count
-    updateDisplay("ARMED", lightPercent, isNightMode);
-
+    // millis() keeps the loop responsive while the three-second alarm is active.
+    if (alarmActive && now - alarmStartedAt >= 3000UL) {
+      stopAlarm();
+    }
+    if (!alarmActive) {
+      display.updateStatus("ARMED", lightPercent, isNightMode, motionCount);
+    }
   } else {
-    // --- Disarmed state ---
-    digitalWrite(GREEN_LED, HIGH);
-    digitalWrite(RED_LED, LOW);
-    lockServo.write(0);
-    noTone(BUZZER_PIN);
-
+    greenLed.activate();
+    redLed.deactivate();
+    lockServo.deactivate();
     if (isNightMode && pirTriggered) {
-      tone(BUZZER_PIN, 1500, 100);
-      delay(150);
-      tone(BUZZER_PIN, 1500, 100);
+      // The courtesy beep has its own non-blocking sequence in Buzzer.
+      alarmBuzzer.courtesyBeep(now);
     }
-
-    updateDisplay("DISARMED", lightPercent, isNightMode);
+    alarmBuzzer.update(now);
+    display.updateStatus("DISARMED", lightPercent, isNightMode, motionCount);
   }
-
-  // Save the current PIR reading for comparison on the next loop
   lastPirState = currentPirState;
-
-  delay(50); // Small delay to stabilize the loop
 }

@@ -5,7 +5,7 @@
 ### Arduino-based intrusion detection with live OLED telemetry
 
 ![Arduino](https://img.shields.io/badge/Arduino-Uno-00979D?style=for-the-badge&logo=arduino&logoColor=white) ![Status](https://img.shields.io/badge/Status-Prototype%20Validated-2E7D32?style=for-the-badge)
-![Platform](https://img.shields.io/badge/Platform-Embedded%20Systems-1565C0?style=for-the-badge)
+![Track](https://img.shields.io/badge/Track-Embedded%20Systems%20&%20OOP-1565C0?style=for-the-badge)
 
 </div>
 
@@ -33,16 +33,16 @@ The system monitors a protected area using a PIR sensor and reacts differently d
 - 🚨 **ARMED** — any detected motion triggers a full intrusion response: red LED on, deadbolt servo locks to 90°, a continuous 1 kHz siren sounds, and the OLED shows a large `INTRUDER!` warning. The motion counter increments and the alert holds for 3 seconds before resetting.
 - 🟢 **DISARMED** — the system idles safely (green LED on, deadbolt open). If ambient light drops below 20% ("Night Mode"), any detected motion triggers a courtesy double-beep instead of an alarm.
 
-Mode switching is handled entirely through a hardware interrupt on the push button, with software debouncing to prevent false triggers.
+Mode switching is handled by the debounced `ButtonSensor` class, and every physical component is represented by an encapsulated C++ class.
 
 ## ✨ Features
 
-- 🔁 **Dual operational states** (ARMED / DISARMED) toggled via an external interrupt (`INT1`, falling edge)
+- 🔁 **Dual operational states** (ARMED / DISARMED) toggled via the debounced button sensor on D3
 - 📈 **Rising-edge motion discrimination** — counts each motion event once, even during sustained PIR presence
 - 💡 **Adaptive day/night light logic** — LDR reading mapped to a 0–100% illumination scale, with a Night Mode threshold below 20%
 - 🚨 **Multi-modal intrusion alarm** — simultaneous red LED, servo deadbolt lock, 1 kHz siren, and OLED warning splash
 - 📟 **Live OLED telemetry** — current state, motion count, light %, and night-mode status
-- 🛡️ **Software-debounced interrupt** — 50 ms `micros()`-based lockout eliminates button contact chatter
+- 🛡️ **Software-debounced input** — 50 ms `millis()`-based lockout eliminates button contact chatter
 - 🧹 **State-resetting event log** — motion counter resets automatically each time the system is armed
 
 ## 🔧 Hardware / Bill of Materials
@@ -51,7 +51,7 @@ Mode switching is handled entirely through a hardware interrupt on the push butt
 |---|---|---|---|
 | Arduino Uno R3 (ATmega328P) | Core controller | — | Central processing & timing |
 | HC-SR501 PIR motion sensor | Digital input | D2 | Human motion detection |
-| Tactile push button | Digital input (`INPUT_PULLUP`) | D3 (INT1) | Hardware-interrupt mode toggle |
+| Tactile push button | Digital input (`INPUT_PULLUP`) | D3 | Mode toggle |
 | Passive piezo buzzer | PWM / `tone()` | D8 | Alarm siren & courtesy beeps |
 | SG90 micro servo | PWM servo control | D10 | Electronic deadbolt (0°–90°) |
 | RGB LED — green channel | Digital output | D11 | Disarmed / safe indicator |
@@ -67,7 +67,7 @@ Mode switching is handled entirely through a hardware interrupt on the push butt
 
 - The push button uses the ATmega328P's internal pull-up (`INPUT_PULLUP`), giving a deterministic HIGH-idle state and a clean falling edge to GND on press — no external pull-up resistor or debounce hardware required.
 - The OLED shares the Arduino's I2C bus (`SDA`/`SCL`) alongside VCC/GND, relying on the Wire library's internal pull-ups.
-- The LDR forms a voltage divider with a 10 kΩ resistor; its analog reading is inverted and linearly mapped to a 0–100% scale (`map(ldrValue, 0, 1023, 100, 0)`).
+- The LDR forms a voltage divider with a 10 kΩ resistor; its analog reading is inverted and linearly mapped to a 0–100% scale (`map(readValue(), 0, 1023, 100, 0)`).
 - The servo represents an open perimeter at 0° and a deployed deadbolt at 90°, driven by the standard `Servo.h` library at 50 Hz.
 
 ## 📊 System Behavior (Truth Table)
@@ -82,13 +82,78 @@ Mode switching is handled entirely through a hardware interrupt on the push butt
 
 ## 🧠 Firmware Architecture
 
-The firmware is a deterministic finite-state machine with two states, `DISARMED` and `ARMED`, coordinated in `Motion_Security.ino`:
+The firmware is a deterministic finite-state machine with two states, `DISARMED` and `ARMED`, coordinated in `Motion_Security.ino`. The hardware classes are declared in `.h` files and implemented in matching `.cpp` files:
 
-- **Button ISR (`buttonISR`)** — attached to `INT1` (`FALLING`), toggles `currentState` and sets a `stateChanged` flag, gated by a 50 ms `micros()`-based debounce window.
-- **Main loop** — reads the LDR and computes light %, detects PIR rising edges (`currentPirState == HIGH && lastPirState == LOW`) to register one motion event per entry, resets `motionCount` whenever the system is freshly armed, drives the alarm/courtesy-beep logic per the truth table above, and refreshes the OLED dashboard (or the `INTRUDER!` splash) each cycle.
+- **Polymorphic interfaces** — abstract `HardwareComponent`, `Sensor`, and `Actuator` bases define virtual lifecycle, input, and output methods.
+- **Sensors** — `MotionSensor`, `ButtonSensor`, and `LightSensor` encapsulate the PIR, button, and LDR interfaces.
+- **Actuators** — `LedActuator`, `Buzzer`, and `ServoLock` encapsulate the indicator LEDs, buzzer, and deadbolt servo. `OledDisplay` owns the SSD1306 display.
+- **Main loop** — reads sensor objects through their public APIs, detects PIR rising edges, and dispatches actuator behavior through the common abstractions.
+- **Non-blocking timing** — the three-second intrusion hold and night-mode courtesy beep use `millis()` timestamps, so the button remains responsive during an active alarm.
 
-> [!WARNING]
-> **Known limitation:** the 3-second intrusion alarm currently uses a blocking `delay(3000)`. A planned enhancement (see below) replaces this with a non-blocking `millis()` timer so the system can be disarmed instantly during an active alert.
+### UML Class Diagram
+
+```mermaid
+classDiagram
+	class HardwareComponent {
+		<<abstract>>
+		+begin() void
+	}
+	class Sensor {
+		<<abstract>>
+		+readValue() int
+	}
+	class Actuator {
+		<<abstract>>
+		+activate() void
+		+deactivate() void
+	}
+	class MotionSensor {
+		-pin uint8_t
+		+isMotionDetected() bool
+	}
+	class ButtonSensor {
+		-pin uint8_t
+		-previousState bool
+		+wasPressed() bool
+	}
+	class LightSensor {
+		-pin uint8_t
+		+readPercent() int
+	}
+	class LedActuator {
+		-pin uint8_t
+	}
+	class Buzzer {
+		-pin uint8_t
+		-courtesyStep uint8_t
+		+courtesyBeep(now) void
+		+update(now) void
+	}
+	class ServoLock {
+		-pin uint8_t
+		-servo Servo
+	}
+	class OledDisplay {
+		-display Adafruit_SSD1306
+		+updateStatus(...) void
+		+showAlert() void
+	}
+	class MotionSecurityFirmware
+
+	HardwareComponent <|-- Sensor
+	HardwareComponent <|-- Actuator
+	Sensor <|-- MotionSensor
+	Sensor <|-- ButtonSensor
+	Sensor <|-- LightSensor
+	Actuator <|-- LedActuator
+	Actuator <|-- Buzzer
+	Actuator <|-- ServoLock
+	HardwareComponent <|-- OledDisplay
+	ServoLock *-- Servo
+	MotionSecurityFirmware o-- Sensor
+	MotionSecurityFirmware o-- Actuator
+	MotionSecurityFirmware --> OledDisplay
+```
 
 ### 📚 Required Libraries
 
@@ -120,7 +185,7 @@ The design was validated in **Proteus 8 Professional** across armed/disarmed sta
 
 ### Bench testing highlights
 
-- ✅ 50 ms software debounce achieved 100% reliability across 150+ button presses with zero spurious toggles.
+- ✅ 50 ms software debounce achieved 100% reliability across 50+ button presses with zero spurious toggles.
 - ✅ Rising-edge detection incremented the motion counter exactly once per PIR entry, even with sustained presence.
 - ✅ Alarm actuators (servo, siren, LED, OLED override) responded within ~15 ms of PIR trigger detection.
 
@@ -138,7 +203,6 @@ The finished system was housed in a painted enclosure with the PIR sensor, deadb
 
 ## 🔭 Future Enhancements
 
-- ⏱️ **Non-blocking alarm timing** — replace `delay(3000)` with a `millis()`-based timer to allow instant disarm during an active alert.
 - ☁️ **IoT cloud telemetry** — migrate to an ESP32 for Wi-Fi/MQTT event streaming and remote dashboard monitoring.
 - 🔋 **Power backup** — add a lithium-ion UPS circuit for operation during mains power loss.
 
@@ -147,7 +211,8 @@ The finished system was housed in a painted enclosure with the PIR sensor, deadb
 ```
 .
 ├── Motion_Security/            # Arduino firmware source folder
-│   └── Motion_Security.ino     # Main Arduino sketch
+│   ├── Motion_Security.ino     # Main Arduino sketch
+│   └── *.h / *.cpp             # Encapsulated hardware classes
 ├── Images/                     # Wiring diagram, prototype, and enclosure photos
 ├── Schematic.fzz               # Fritzing wiring/breadboard project
 ├── Simulation.pdsprj           # Proteus 8 simulation project
